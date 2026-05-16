@@ -24,8 +24,8 @@ function App() {
     authors: 'Không xác định', 
     journal: '', 
     year: '',
-    author_count: 1, // Trường mới
-    is_main: true    // Trường mới
+    author_count: 1, 
+    is_main: true    
   });
   const [singleScore, setSingleScore] = useState(null);
   const [singleLoading, setSingleLoading] = useState(false);
@@ -42,7 +42,6 @@ function App() {
     if (!singleInput.title || !singleInput.journal) return alert("Nhập đủ Tên bài và Tạp chí nhé!");
     setSingleLoading(true);
     
-    // Ép kiểu dữ liệu an toàn trước khi gửi API
     const payload = {
       ...singleInput,
       author_count: parseInt(singleInput.author_count) || 1,
@@ -76,14 +75,22 @@ function App() {
     if (!file) return;
     setLoading(true);
     setResult(null);
+    setEditableArticles([]);
     const formData = new FormData();
     formData.append('file', file);
     try {
       const response = await axios.post('https://kltn-check-cv-auto.onrender.com/api/score-cv', formData);
       const data = response.data;
+      
+      if (data.status === "Warning") {
+        alert(data.message);
+        setResult(data);
+        return;
+      }
+      
       setResult(data);
-      setEditableArticles(data.detailed_scores);
-      setTotalScore(data.summary.total_max_score_estimated);
+      setEditableArticles(data.detailed_scores || []);
+      setTotalScore(data.summary?.total_max_score_estimated || 0);
     } catch (error) {
       alert("Lỗi hệ thống khi phân tích CV!");
     } finally {
@@ -186,13 +193,24 @@ function App() {
           )}
         </div>
 
-        {/* Khối hiển thị kết quả phân tích */}
-        {result && (
+        {/* Khối hiển thị cảnh báo từ hệ thống nếu status là Warning */}
+        {result && result.status === "Warning" && (
+          <div style={{ padding: '20px', background: '#fef2f2', color: '#991b1b', borderRadius: '12px', border: '1px solid #fee2e2', marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <AlertCircle color="#b91c1c" />
+            <div>
+              <strong style={{ display: 'block' }}>Hệ thống không thể phân tích tệp tin này:</strong>
+              {result.message}
+            </div>
+          </div>
+        )}
+
+        {/* Khối hiển thị kết quả phân tích chỉ vẽ khi status là Success */}
+        {result && result.status === "Success" && (
           <div style={{ animation: 'fadeIn 0.4s ease' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#eff6ff', padding: '20px 25px', borderRadius: '12px', border: '1px solid #bfdbfe', marginBottom: '25px' }}>
               <div>
                 <h3 style={{ margin: '0 0 5px', color: COLORS.primary, fontSize: '18px' }}>Kết quả CV: {result.filename}</h3>
-                <p style={{ margin: 0, color: COLORS.subtle, fontSize: '14px' }}>Số bài: <b>{result.summary.total_articles}</b> bài báo khoa học.</p>
+                <p style={{ margin: 0, color: COLORS.subtle, fontSize: '14px' }}>Số bài: <b>{result.summary?.total_articles}</b> bài báo khoa học.</p>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '42px', fontWeight: '800', color: COLORS.success }}>{totalScore.toFixed(2)}</div>
@@ -260,6 +278,7 @@ function App() {
         )}
       </div>
 
+      {/* Style CSS */}
       <style>{`
         .animate-spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
