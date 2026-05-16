@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-POPPLER_PATH = r'E:\ToTNghiep\poppler-25.12.0\Library\bin' 
+POPPLER_PATH = r'E:\ToTNghiep\poppler-25.12.0\Library\bin' if os.name == 'nt' else None 
 
 def clean_json_string(raw_str):
     """Lọc lấy phần JSON nằm trong cặp ngoặc []"""
