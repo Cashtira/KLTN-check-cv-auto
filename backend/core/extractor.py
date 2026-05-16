@@ -1,60 +1,116 @@
-import pdfplumber
+import os
+import base64
+import json
+import io
 import re
+import time
+import pdfplumber
+from openai import OpenAI
+from pdf2image import convert_from_path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+POPPLER_PATH = r'E:\ToTNghiep\poppler-25.12.0\Library\bin' 
+
+def clean_json_string(raw_str):
+    """Lọc lấy phần JSON nằm trong cặp ngoặc []"""
+    try:
+        match = re.search(r'\[.*\]', raw_str, re.DOTALL)
+        if match:
+            return match.group(0)
+        return raw_str.strip()
+    except:
+        return raw_str
+
+def encode_image(image):
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 def extract_scientific_articles(pdf_path):
-    articles = []
-    # Tìm mục 7.1 hoặc 7.1.a có chữ Bài báo khoa học
-    start_pattern = re.compile(r"7\.1(\.a)?\.?\s*Bài báo khoa học", re.IGNORECASE)
-    # Dừng lại khi gặp mục lớn tiếp theo (7.1.b, 7.2 hoặc 8)
-    stop_pattern = re.compile(r"7\.1\.b|7\.2|8\.", re.IGNORECASE)
+    all_articles = []
+    start_page = -1
+    end_page = -1
 
     try:
+        # BƯỚC 1: XÁC ĐỊNH DẢI TRANG
         with pdfplumber.open(pdf_path) as pdf:
-            is_collecting = False
-            
-            for page in pdf.pages:
+            total_pages = len(pdf.pages)
+            for i, page in enumerate(pdf.pages):
                 text = page.extract_text() or ""
-                
-                # Bật chế độ bóc tách khi thấy tiêu đề mục 7.1.a
-                if start_pattern.search(text):
-                    is_collecting = True
-                
-                if is_collecting:
-                    tables = page.extract_tables()
-                    for table in tables:
-                        # Chỉ lấy bảng có đúng 9 cột (chuẩn Mẫu 01 mục 7.1.a)
-                        if not table or len(table[0]) < 8 or len(table[0]) > 10:
-                            continue
-                        
-                        for row in table:
-                            clean_row = [str(c).replace('\n', ' ').strip() if c else "" for c in row]
-                            
-                            # Nhận diện STT (Phải là số ở cột đầu tiên)
-                            stt_raw = clean_row[0].rstrip('.')
-                            if stt_raw.isdigit():
-                                title = clean_row[1]
-                                # Chỉ lấy nếu tên bài báo đủ dài
-                                if title and len(title) > 15:
-                                    articles.append({
-                                        "stt": stt_raw,
-                                        "title": title,
-                                        "journal": clean_row[4] if len(clean_row) > 4 else "",
-                                        "year": clean_row[8] if len(clean_row) > 8 else ""
-                                    })
-                
-                # Dừng lại khi thấy tiêu đề mục 8
-                if is_collecting and "8. Chủ trì" in text:
-                    break
-                    
-    except Exception as e:
-        print(f"Lỗi: {e}")
-    
-    # Loại bỏ trùng lặp nếu bảng bị lặp lại ở trang sau
-    final_data = []
-    seen = set()
-    for a in articles:
-        if a['title'].lower() not in seen:
-            final_data.append(a)
-            seen.add(a['title'].lower())
+                if start_page == -1 and ("7.1.a" in text or "Bài báo khoa học" in text):
+                    start_page = i
+                if start_page != -1 and i > start_page:
+                    if ("7.1.b" in text or "7.2" in text or "8. Chủ trì" in text):
+                        end_page = i
+                        break
             
-    return final_data
+            if start_page != -1 and end_page == -1:
+                end_page = total_pages - 1
+
+        if start_page == -1:
+            start_page, end_page = 0, min(10, total_pages - 1)
+
+        print(f">>> Target: Trang {start_page + 1} đến {end_page + 1}")
+
+        # BƯỚC 2: CHUYỂN PDF THÀNH ẢNH
+        images = convert_from_path(
+            pdf_path, 
+            dpi=300, 
+            first_page=start_page + 1, 
+            last_page=end_page + 1, 
+            poppler_path=POPPLER_PATH
+        )
+
+        # BƯỚC 3: XỬ LÝ AI TỪNG TRANG ĐỘC LẬP
+        for i, img in enumerate(images):
+            p_num = start_page + i + 1
+            base64_image = encode_image(img)
+            
+            print(f">>> Đang bóc tách trang {p_num}...")
+            
+            # Prompt rút gọn, không yêu cầu nối dòng phức tạp
+            prompt = """
+            Bạn là chuyên gia bóc tách tài liệu. Hãy trích xuất bảng 'Bài báo khoa học' thành JSON.
+            YÊU CẦU CÁC TRƯỜNG DỮ LIỆU:
+            - stt: Số thứ tự (TT).
+            - title: Tên bài báo/báo cáo KH.
+            - author_count: Số lượng tác giả (lấy giá trị số ở cột 'Số tác giả').
+            - is_main: Trả về true nếu cột 'Là tác giả chính' ghi 'Có', ngược lại là false.
+            - journal: Tên tạp chí hoặc kỷ yếu hội thảo/ISSN/ISBN.
+            - category: Nội dung cột 'Loại tạp chí quốc tế uy tín' (ISI, Scopus, Q...).
+            - year: Tháng, năm công bố.
+
+            Chỉ trả về mảng JSON, không giải thích.
+            """
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]}
+                ],
+                temperature=0
+            )
+
+            raw_content = response.choices[0].message.content
+            json_str = clean_json_string(raw_content)
+            
+            try:
+                page_data = json.loads(json_str)
+                if isinstance(page_data, list):
+                    all_articles.extend(page_data)
+                    print(f"  - Đã lấy xong {len(page_data)} bài từ trang {p_num}.")
+            except Exception as e:
+                print(f"  - Lỗi JSON trang {p_num}: {e}")
+
+            time.sleep(2)
+
+    except Exception as e:
+        print(f"Lỗi hệ thống Extractor: {e}")
+            
+    return all_articles
