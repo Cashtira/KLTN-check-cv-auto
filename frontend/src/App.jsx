@@ -50,7 +50,7 @@ function App() {
     };
 
     try {
-      const response = await axios.post('http://localhost:8000/api/score-article', payload);
+      const response = await axios.post('https://kltn-check-cv-auto.onrender.com/api/score-article', payload);
       setSingleScore(response.data.data);
     } catch (error) {
       alert("Lỗi tính điểm lẻ, kiểm tra kết nối Backend nhé!");
@@ -79,7 +79,7 @@ function App() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const response = await axios.post('http://localhost:8000/api/score-cv', formData);
+      const response = await axios.post('https://kltn-check-cv-auto.onrender.com/api/score-cv', formData);
       const data = response.data;
       setResult(data);
       setEditableArticles(data.detailed_scores);
