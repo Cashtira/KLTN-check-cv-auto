@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -14,7 +14,7 @@ load_dotenv()
 
 app = FastAPI(title="Hệ thống Kiểm tra LLKH Tự động")
 
-# Cấu hình CORS để Frontend có thể gọi API
+# Cấu hình CORS để Frontend có thể gọi API local thông thoáng
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,17 +32,19 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# Cấu hình Pydantic Model - Nâng cấp để hỗ trợ tính điểm lẻ theo Điều 8
+# Cấu hình Pydantic Model - Hỗ trợ tính điểm lẻ bên trái kèm tên đối chiếu
 class ArticleInput(BaseModel):
     title: str
     authors: str = "Không xác định"
     journal: str
     year: str
-    author_count: int = 1  # (mặc định là 1 tác giả)
-    is_main: bool = True   # (mặc định là tác giả chính)
+    author_count: int = 1  
+    is_main: bool = True   
+    candidate_name: str = "Nguyễn Minh Kha" # Tiếp nhận tên để đối chiếu bộ tính lẻ
 
 
 # CÁC API ENDPOINTS
+
 @app.get("/")
 async def root():
     return {
@@ -79,7 +81,7 @@ async def upload_cv(file: UploadFile = File(...)):
             os.remove(temp_path)
 
 
-# API 2: Tính điểm cho MỘT bài báo cụ thể (Bộ tính lẻ bên trái)
+# API 2: Tính điểm cho MỘT bài báo cụ thể (Bộ công cụ tính lẻ bên trái)
 @app.post("/api/score-article")
 async def score_article(article: ArticleInput):
     try:
@@ -90,7 +92,8 @@ async def score_article(article: ArticleInput):
             journal_text=article.journal,
             year_str=article.year,
             author_count=article.author_count,  
-            is_main=article.is_main             
+            is_main=article.is_main,
+            candidate_name=article.candidate_name # Đẩy tên ứng viên vào lõi check             
         )
         return {
             "status": "Success",
@@ -100,16 +103,16 @@ async def score_article(article: ArticleInput):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# API 3: Bóc tách PDF và tự động chấm điểm toàn bộ CV
+# API 3: Bóc tách PDF và tự động KIỂM KÊ - ĐỐI CHIẾU chấm điểm toàn bộ CV
 @app.post("/api/score-cv")
-async def score_cv_full(file: UploadFile = File(...)):
+async def score_cv_full(file: UploadFile = File(...), candidate_name: str = Form("Nguyễn Minh Kha")):
     temp_path = f"temp_score_{file.filename}"
     try:
-        # Bước 1: Lưu file PDF tạm
+        # Bước 1: Lưu file PDF tạm dưới máy local Windows
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Bước 2: Bóc tách dữ liệu từ AI
+        # Bước 2: Gọi AI bóc tách cấu trúc bảng
         extracted_data = extract_scientific_articles(temp_path)
         
         if not extracted_data:
@@ -119,36 +122,34 @@ async def score_cv_full(file: UploadFile = File(...)):
                 "message": "Không tìm thấy dữ liệu bài báo khoa học trong PDF."
             }
         
-        # Bước 3: Chạy vòng lặp chấm điểm cho từng bài
+        # Bước 3: Chạy vòng lặp chấm điểm và đối chiếu 3 cột sâu với hệ thống quốc tế
         scored_articles = []
         total_score = 0.0
         
-        print(f"Bắt đầu chấm điểm {len(extracted_data)} bài báo cho hồ sơ: {file.filename}")
+        print(f"Bắt đầu kiểm kê và chấm điểm {len(extracted_data)} bài cho hồ sơ: {file.filename}")
         
         for idx, article in enumerate(extracted_data):
-            # TẦNG BẢO VỆ TỪNG DÒNG: Nếu một bài lỗi, bỏ qua và chạy tiếp bài sau chứ không làm sập API
             try:
-                # Sử dụng .get() để phòng thủ tối đa lỗi KeyError (thiếu trường thông tin)
                 title = article.get("title", "Không rõ tên bài báo")
                 journal = article.get("journal", "Không rõ tạp chí")
                 year = article.get("year", "N/A")
                 stt = article.get("stt", idx + 1)
                 
-                # Kiểm tra và ép kiểu an toàn cho Số tác giả (author_count)
+                # Trích xuất an toàn số lượng tác giả kê khai
                 raw_author_count = article.get("author_count", 1)
                 try:
                     author_count = int(raw_author_count) if raw_author_count else 1
                 except:
-                    author_count = 1  # Fallback nếu AI trả về định dạng chữ lạ
+                    author_count = 1  
                 
-                # Kiểm tra tư cách tác giả chính (is_main)
+                # Trích xuất an toàn vai trò tác giả kê khai
                 is_main = article.get("is_main", True)
                 if isinstance(is_main, str):
                     is_main = True if is_main.lower() in ['true', 'có', 'yes', '1'] else False
                 elif is_main is None:
                     is_main = True
 
-                # Gọi hàm tính điểm đã nâng cấp Điều 8
+                # Gọi hàm tính điểm chứa bộ logic cắm cờ Vàng / Đỏ kiểm kê
                 score_result = calculate_single_article_score(
                     supabase=supabase,
                     title=title,
@@ -156,32 +157,30 @@ async def score_cv_full(file: UploadFile = File(...)):
                     journal_text=journal,
                     year_str=str(year),
                     author_count=author_count,
-                    is_main=is_main
+                    is_main=is_main,
+                    candidate_name=candidate_name # Truyền tên nhận từ Frontend vào bộ đối chiếu
                 )
                 
                 score_result["journal"] = journal
-
-                # Gắn thêm STT gốc từ PDF để hiển thị lên bảng
                 score_result["stt_pdf"] = stt
                 score_result["author_count"] = author_count
                 score_result["is_main"] = is_main
                 scored_articles.append(score_result)
                 total_score += score_result["max_score"]
                 
-                print(f"Đã chấm xong bài {idx + 1}/{len(extracted_data)}: {score_result['max_score']} điểm")
+                print(f"Đã kiểm kê xong bài {idx + 1}/{len(extracted_data)}: {score_result['max_score']} điểm")
             
             except Exception as inner_e:
-                print(f"CẢNH BÁO: Bỏ qua bài số {idx + 1} do lỗi xử lý dữ liệu: {inner_e}")
-                continue  # Lệnh này giúp vòng lặp nhảy sang bài tiếp theo ngay lập tức
+                print(f"CẢNH BÁO: Bỏ qua dòng lỗi dữ liệu số {idx + 1}: {inner_e}")
+                continue  
             
-        # Bước 4: Trả về kết quả tổng quát cho Frontend
+        # Bước 4: Trả cấu trúc dữ liệu đối chiếu chuẩn về cho Frontend render bảng
         return {
             "status": "Success",
             "filename": file.filename,
             "summary": {
-                "total_articles": len(scored_articles),  # Chỉ đếm số bài tính điểm thành công
-                "total_max_score_estimated": total_score,
-                "note": "Hệ thống đã tự động quy đổi điểm theo Điều 8 (Tác giả chính hưởng 1/3, phần còn lại chia đều)."
+                "total_articles": len(scored_articles),  
+                "total_max_score_estimated": total_score
             },
             "detailed_scores": scored_articles
         }
