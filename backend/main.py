@@ -14,7 +14,7 @@ load_dotenv()
 
 app = FastAPI(title="Hệ thống Kiểm tra LLKH Tự động")
 
-# Cấu hình CORS để Frontend có thể gọi API local thông thoáng
+# Cấu hình CORS để Frontend gọi API local
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,13 +26,10 @@ app.add_middleware(
 # Khởi tạo kết nối Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("CẢNH BÁO: Thiếu SUPABASE_URL hoặc SUPABASE_KEY trong file .env")
-    
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# Cấu hình Pydantic Model - Hỗ trợ tính điểm lẻ bên trái kèm tên đối chiếu
+# Cấu hình Pydantic Model - Tính điểm lẻ bên trái
 class ArticleInput(BaseModel):
     title: str
     authors: str = "Không xác định"
@@ -40,10 +37,8 @@ class ArticleInput(BaseModel):
     year: str
     author_count: int = 1  
     is_main: bool = True   
-    candidate_name: str = "Nguyễn Minh Kha" # Tiếp nhận tên để đối chiếu bộ tính lẻ
+    candidate_name: str = "Nguyễn Minh Kha"
 
-
-# CÁC API ENDPOINTS
 
 @app.get("/")
 async def root():
@@ -54,7 +49,7 @@ async def root():
     }
 
 
-# API 1: Bóc tách bài báo từ file PDF
+# API 1: Bóc tách bài báo từ file PDF (Thuần thô)
 @app.post("/api/extract-cv")
 async def upload_cv(file: UploadFile = File(...)):
     temp_path = f"temp_{file.filename}"
@@ -81,7 +76,7 @@ async def upload_cv(file: UploadFile = File(...)):
             os.remove(temp_path)
 
 
-# API 2: Tính điểm cho MỘT bài báo cụ thể (Bộ công cụ tính lẻ bên trái)
+# API 2: Tính điểm cho MỘT bài báo cụ thể (Bộ tính lẻ bên trái)
 @app.post("/api/score-article")
 async def score_article(article: ArticleInput):
     try:
@@ -93,7 +88,7 @@ async def score_article(article: ArticleInput):
             year_str=article.year,
             author_count=article.author_count,  
             is_main=article.is_main,
-            candidate_name=article.candidate_name # Đẩy tên ứng viên vào lõi check             
+            candidate_name=article.candidate_name             
         )
         return {
             "status": "Success",
@@ -103,16 +98,18 @@ async def score_article(article: ArticleInput):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# API 3: Bóc tách PDF và tự động KIỂM KÊ - ĐỐI CHIẾU chấm điểm toàn bộ CV
+# API 3: Bóc tách PDF và tự động KIỂM KÊ - LƯU LỊCH SỬ DASHBOARD PHÂN QUYỀN
 @app.post("/api/score-cv")
-async def score_cv_full(file: UploadFile = File(...), candidate_name: str = Form("Nguyễn Minh Kha")):
+async def score_cv_full(
+    file: UploadFile = File(...), 
+    candidate_name: str = Form("Nguyễn Minh Kha"), # <-- ĐÃ ĐỔI THÀNH MINH KHA
+    user_id: str = Form(...) # <-- ĐÃ BỔ SUNG: Hứng mã định danh từ Frontend gửi lên ngầm
+):
     temp_path = f"temp_score_{file.filename}"
     try:
-        # Bước 1: Lưu file PDF tạm dưới máy local Windows
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Bước 2: Gọi AI bóc tách cấu trúc bảng
         extracted_data = extract_scientific_articles(temp_path)
         
         if not extracted_data:
@@ -122,11 +119,8 @@ async def score_cv_full(file: UploadFile = File(...), candidate_name: str = Form
                 "message": "Không tìm thấy dữ liệu bài báo khoa học trong PDF."
             }
         
-        # Bước 3: Chạy vòng lặp chấm điểm và đối chiếu 3 cột sâu với hệ thống quốc tế
         scored_articles = []
         total_score = 0.0
-        
-        print(f"Bắt đầu kiểm kê và chấm điểm {len(extracted_data)} bài cho hồ sơ: {file.filename}")
         
         for idx, article in enumerate(extracted_data):
             try:
@@ -135,21 +129,18 @@ async def score_cv_full(file: UploadFile = File(...), candidate_name: str = Form
                 year = article.get("year", "N/A")
                 stt = article.get("stt", idx + 1)
                 
-                # Trích xuất an toàn số lượng tác giả kê khai
                 raw_author_count = article.get("author_count", 1)
                 try:
                     author_count = int(raw_author_count) if raw_author_count else 1
                 except:
                     author_count = 1  
                 
-                # Trích xuất an toàn vai trò tác giả kê khai
                 is_main = article.get("is_main", True)
                 if isinstance(is_main, str):
                     is_main = True if is_main.lower() in ['true', 'có', 'yes', '1'] else False
                 elif is_main is None:
                     is_main = True
 
-                # Gọi hàm tính điểm chứa bộ logic cắm cờ Vàng / Đỏ kiểm kê
                 score_result = calculate_single_article_score(
                     supabase=supabase,
                     title=title,
@@ -158,7 +149,7 @@ async def score_cv_full(file: UploadFile = File(...), candidate_name: str = Form
                     year_str=str(year),
                     author_count=author_count,
                     is_main=is_main,
-                    candidate_name=candidate_name # Truyền tên nhận từ Frontend vào bộ đối chiếu
+                    candidate_name=candidate_name
                 )
                 
                 score_result["journal"] = journal
@@ -167,14 +158,43 @@ async def score_cv_full(file: UploadFile = File(...), candidate_name: str = Form
                 score_result["is_main"] = is_main
                 scored_articles.append(score_result)
                 total_score += score_result["max_score"]
-                
-                print(f"Đã kiểm kê xong bài {idx + 1}/{len(extracted_data)}: {score_result['max_score']} điểm")
             
             except Exception as inner_e:
-                print(f"CẢNH BÁO: Bỏ qua dòng lỗi dữ liệu số {idx + 1}: {inner_e}")
+                print(f"CẢNH BÁO: Bỏ qua dòng lỗi số {idx + 1}: {inner_e}")
                 continue  
             
-        # Bước 4: Trả cấu trúc dữ liệu đối chiếu chuẩn về cho Frontend render bảng
+        # --- ĐOẠN GHI NHẬT KÝ ĐÃ ĐƯỢC ĐỒNG BỘ CỘT USER_ID ---
+        if scored_articles:
+            valid_score = sum(
+                art["max_score"] for art in scored_articles 
+                if art.get("check_title", {}).get("status") is True 
+                and art.get("check_author_count", {}).get("status") is True
+            )
+            
+            correct_count = sum(
+                1 for art in scored_articles 
+                if art.get("check_title", {}).get("status") is True 
+                and art.get("check_author_count", {}).get("status") is True
+            )
+            accuracy_rate = (correct_count / len(scored_articles) * 100) if len(scored_articles) > 0 else 0.0
+            
+            # Đóng gói dữ liệu truyền trực tiếp xuống bảng cv_histories
+            history_payload = {
+                "user_id": user_id, # <-- ĐÃ BỔ SUNG: Truyền ID tài khoản xuống DB
+                "file_name": file.filename,
+                "candidate_name": candidate_name,
+                "total_articles": len(scored_articles),
+                "valid_score": round(float(valid_score), 2),
+                "total_score": round(float(total_score), 2),
+                "accuracy_rate": round(float(accuracy_rate), 2)
+            }
+            
+            try:
+                supabase.table("cv_histories").insert(history_payload).execute()
+                print(f"-> Đã lưu lịch sử thẩm định hồ sơ {candidate_name} xuống Supabase thành công!")
+            except Exception as db_e:
+                print(f"-> Lỗi ghi log lịch sử xuống database: {db_e}")
+
         return {
             "status": "Success",
             "filename": file.filename,
