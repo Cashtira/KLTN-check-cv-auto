@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { supabase } from './supabaseClient'; 
 import { Upload, FileText, CheckCircle, BrainCircuit, Loader2, Calculator, Copy, RefreshCw, AlertCircle, UserCheck, Users, LogOut, Lock, Mail, History, FileSearch } from 'lucide-react';
+import AdminDashboard from './AdminDashboard';
 
 const COLORS = {
   bg: '#f8fafc',
@@ -44,6 +45,9 @@ function App() {
   const [result, setResult] = useState(null);
   const [editableArticles, setEditableArticles] = useState([]);
   const [totalScore, setTotalScore] = useState(0);
+
+  // --- STATE QUẢN LÝ CHUYỂN TRANG --- 
+  const [currentView, setCurrentView] = useState('main');
 
   // LẮNG NGHE TRẠNG THÁI ĐĂNG NHẬP
   useEffect(() => {
@@ -208,7 +212,7 @@ function App() {
     });
   };
 
-  // RENDER MÀN HÌNH ĐĂNG NHẬP CHÍNH GIỮA (ĐÃ FIX OVERFLOW)
+  // RENDER MÀN HÌNH ĐĂNG NHẬP CHÍNH GIỮA
   if (!session) {
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyInverted: 'center', justifyContent: 'center', zIndex: 9999 }}>
@@ -255,7 +259,7 @@ function App() {
   return (
     <div style={{ display: 'flex', height: '100vh', backgroundColor: COLORS.bg, overflow: 'hidden' }}>
       
-      {/* BỘ TÍNH ĐIỂM LẺ BÊN TRÁI (ĐÃ BỎ Ô HỌ TÊN ĐỐI CHIẾU THEO Ý KHA) */}
+      {/* BỘ TÍNH ĐIỂM LẺ BÊN TRÁI */}
       <div style={{ width: '350px', backgroundColor: COLORS.sidebar, borderRight: `1px solid ${COLORS.border}`, padding: '25px', display: 'flex', flexDirection: 'column', gap: '15px', overflowY: 'auto' }}>
         <h2 style={{ fontSize: '17px', display: 'flex', alignItems: 'center', gap: '10px', color: COLORS.primary, margin: '0 0 10px 0' }}>
           <Calculator size={18} /> Tính điểm một bài báo
@@ -313,7 +317,7 @@ function App() {
           </div>
         </div>
 
-        {/* THANH DIỀU HƯỚNG TAB QUẢN LÝ THEO Ý KHA */}
+        {/* THANH DIỀU HƯỚNG TAB QUẢN LÝ*/}
         <div style={{ display: 'flex', gap: '25px', borderBottom: `1px solid ${COLORS.border}`, marginBottom: '25px' }}>
           <button 
             onClick={() => setActiveTab('evaluate')}
@@ -337,6 +341,20 @@ function App() {
           >
             <History size={17} /> Lịch sử chấm
           </button>
+          {/* --- NÚT TAB ADMIN: CHỈ HIỂN THỊ NẾU EMAIL TRÙNG VỚI EMAIL ADMIN ĐỊNH SẴN --- */}
+          {session?.user?.email === 'admin@gmail.com' && (
+          <button 
+            onClick={() => setActiveTab('admin')}
+            style={{
+             padding: '12px 4px', background: 'none', border: 'none',
+             borderBottom: activeTab === 'admin' ? `3px solid ${COLORS.primary}` : '3px solid transparent',
+             color: activeTab === 'admin' ? COLORS.primary : COLORS.subtle,
+             fontWeight: '700', cursor: 'pointer', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '8px'
+            }}
+          >
+            <Users size={17} /> Quản lý người dùng
+  </button>
+)}
         </div>
 
         {/* --- NỘI DUNG TAB 1: THẨM ĐỊNH HỒ SƠ --- */}
@@ -499,6 +517,16 @@ function App() {
             )}
           </div>
         )}
+
+        {/* --- NỘI DUNG TAB 3: DASHBOARD QUẢN LÝ TÀI KHOẢN (ADMIN) --- */}
+        {activeTab === 'admin' && session?.user?.email === 'admin@gmail.com' && (
+          <div style={{ background: 'white', padding: '25px', borderRadius: '16px', border: `1px solid ${COLORS.border}`, animation: 'fadeIn 0.3s ease' }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '16px', fontWeight: '700', color: COLORS.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Quản lý tài khoản người dùng
+            </h3>
+    <AdminDashboard />
+  </div>
+)}
 
       </div>
 

@@ -210,3 +210,40 @@ async def score_cv_full(
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+# API 4: ADMIN DASHBOARD
+@app.get("/api/admin/users-summary")
+async def get_users_summary():
+    try:
+        # 1. Hàm này trả về thẳng một cái list các user
+        users_list = supabase.auth.admin.list_users()
+        
+        # 2. Truy vấn bảng history_check để đếm số lần quét CV 
+        history_response = supabase.table("cv_histories").select("user_id").execute()
+        history_data = history_response.data
+        
+        # 3. Tiến hành đếm số lần xuất hiện
+        scan_counts = {}
+        for row in history_data:
+            uid = row.get("user_id")
+            if uid:
+                scan_counts[uid] = scan_counts.get(uid, 0) + 1
+                
+        # 4. Duyệt trực tiếp qua users_list vì nó đã là một list
+        summary = []
+        for u in users_list:
+            u_id = getattr(u, 'id', None) or u.get('id') if isinstance(u, dict) else u.id
+            u_email = getattr(u, 'email', None) or u.get('email') if isinstance(u, dict) else u.email
+            u_created = getattr(u, 'created_at', None) or u.get('created_at') if isinstance(u, dict) else u.created_at
+            
+            summary.append({
+                "id": u_id,
+                "email": u_email,
+                "created_at": u_created,
+                "total_scans": scan_counts.get(u_id, 0)
+            })
+            
+        return {"success": True, "data": summary}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
